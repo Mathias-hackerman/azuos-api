@@ -12,5 +12,5 @@ class Config:
         "pool_pre_ping": True,
         "pool_recycle": 300,
     }
-    AI_AGENT_URL = os.getenv("AI_AGENT_URL", "http://localhost:8000")
+    AI_AGENT_URL = os.getenv("AI_AGENT_URL", "https://azuos-adk-agent-97yo.onrender.com:8000")
     AI_APP_NAME = os.getenv("AI_APP_NAME", "azuos_compliance_beta")

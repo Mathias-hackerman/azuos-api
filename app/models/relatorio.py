@@ -11,7 +11,8 @@ class Relatorio(db.Model):
 
     def to_dict(self):
         return {
-            "relatorio_id": self.relatorio_id, "conteudo": self.conteudo,
+            "relatorio_id": self.relatorio_id, 
+            "conteudo": self.conteudo,
             "data_criacao": self.data_criacao.isoformat() if self.data_criacao else None,
             "submissao_id": self.submissao_id,
         }
