@@ -78,7 +78,7 @@ def gerar_relatorio_ia(submissao):
     """
     Realiza a chamada HTTP para o agente de IA real e persiste o relatório no banco de dados.
     """
-    agent_url = current_app.config.get("AI_AGENT_URL", "https://azuos-adk-agent-97yo.onrender.com:8000")
+    agent_url = (current_app.config.get("AI_AGENT_URL") or "https://azuos-adk-agent-97yo.onrender.com").rstrip("/")
     app_name = current_app.config.get("AI_APP_NAME", "azuos_compliance_beta")
     user_id = f"u_{submissao.usuario_id}"
     session_id = f"s_{submissao.submissao_id}"
