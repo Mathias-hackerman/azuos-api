@@ -7,7 +7,7 @@ load_dotenv()
 
 
 def _normalize_agent_url(raw_url: str | None) -> str:
-    default_url = "https://azuos-adk-agent-97yo.onrender.com"
+    default_url = "https://azuos-adk-agent-97yo.onrender.com:8000"
     if not raw_url:
         return default_url
 
@@ -15,13 +15,14 @@ def _normalize_agent_url(raw_url: str | None) -> str:
         raw_url = f"https://{raw_url}"
 
     parsed = urlsplit(raw_url)
-    if parsed.hostname and parsed.hostname.endswith(".onrender.com"):
+    if parsed.hostname:
         netloc = parsed.hostname
+        netloc = f"{netloc}:8000"
         if parsed.username:
-            netloc = parsed.username
+            auth = parsed.username
             if parsed.password:
-                netloc += f":{parsed.password}"
-            netloc += f"@{parsed.hostname}"
+                auth += f":{parsed.password}"
+            netloc = f"{auth}@{netloc}"
         return urlunsplit((parsed.scheme, netloc, parsed.path.rstrip("/"), parsed.query, parsed.fragment))
 
     return raw_url.rstrip("/")
