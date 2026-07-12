@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import date
 
 import requests
@@ -74,6 +75,43 @@ def extrair_texto_resposta(response_json):
     raise ValueError("Formato de resposta do agente de IA inválido ou texto não encontrado.")
 
 
+def _log_erro_http(prefixo, e):
+    """Loga status code e corpo da resposta quando disponível, em vez de só a exceção genérica."""
+    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+        logger.error(f"{prefixo}: HTTP {e.response.status_code} - corpo: {e.response.text[:1000]}")
+    elif isinstance(e, requests.exceptions.Timeout):
+        logger.error(f"{prefixo}: timeout - {e}")
+    elif isinstance(e, requests.exceptions.ConnectionError):
+        logger.error(f"{prefixo}: erro de conexão - {e}")
+    else:
+        logger.error(f"{prefixo}: {e}")
+
+
+def _acordar_agente(agent_url, tentativas=6, intervalo=10, timeout_por_tentativa=15):
+    """
+    Faz ping em /docs para 'acordar' o serviço (free tier do Render hiberna após inatividade
+    e pode levar 30-50s+ para responder de novo). Tenta várias vezes até o serviço responder
+    ou até esgotar as tentativas. Retorna True se o serviço respondeu, False caso contrário.
+    """
+    docs_url = f"{agent_url}/docs"
+    for tentativa in range(1, tentativas + 1):
+        try:
+            logger.info(f"Verificando se o agente está no ar (tentativa {tentativa}/{tentativas}): {docs_url}")
+            resp = requests.get(docs_url, timeout=timeout_por_tentativa)
+            if resp.status_code == 200:
+                logger.info("Agente está no ar e respondendo.")
+                return True
+            logger.warning(f"Agente respondeu com status inesperado: {resp.status_code}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Agente ainda não respondeu (tentativa {tentativa}/{tentativas}): {e}")
+
+        if tentativa < tentativas:
+            time.sleep(intervalo)
+
+    logger.error("Agente não respondeu após todas as tentativas de wake-up.")
+    return False
+
+
 def gerar_relatorio_ia(submissao):
     """
     Realiza a chamada HTTP para o agente de IA real e persiste o relatório no banco de dados.
@@ -82,9 +120,22 @@ def gerar_relatorio_ia(submissao):
     app_name = current_app.config.get("AI_APP_NAME", "azuos_compliance_beta")
     user_id = f"u_{submissao.usuario_id}"
     session_id = f"s_{submissao.submissao_id}"
-    
+
     logger.info(f"Conectando ao agente de IA em {agent_url} para submissão {submissao.submissao_id}")
-    
+
+    # 0. ACORDAR O AGENTE (evita timeout por cold start do Render free tier)
+    agente_no_ar = _acordar_agente(agent_url)
+    if not agente_no_ar:
+        conteudo = _gerar_placeholder(submissao) + "\n\n*⚠️ NOTA: Este relatório foi gerado automaticamente usando dados simulados pois o agente de IA não respondeu ao ser acordado.*"
+        relatorio = Relatorio(
+            conteudo=conteudo,
+            data_criacao=date.today(),
+            submissao_id=submissao.submissao_id,
+        )
+        db.session.add(relatorio)
+        db.session.commit()
+        return relatorio
+
     # 1. CRIAR SESSÃO
     session_url = f"{agent_url}/apps/{app_name}/users/{user_id}/sessions/{session_id}"
     try:
@@ -93,7 +144,7 @@ def gerar_relatorio_ia(submissao):
         resp_session.raise_for_status()
         logger.info("Sessão criada com sucesso no agente!")
     except Exception as e:
-        logger.warning(f"Erro ao criar sessão no agente: {e}. Continuando com o envio da mensagem.")
+        _log_erro_http("Erro ao criar sessão no agente (continuando com o envio da mensagem)", e)
 
     # 2. ENVIAR A MSG (O RUN)
     run_url = f"{agent_url}/run"
@@ -119,7 +170,7 @@ def gerar_relatorio_ia(submissao):
         logger.info("Relatório gerado com sucesso pelo agente de IA.")
         
     except Exception as e:
-        logger.error(f"Falha na comunicação com o agente de IA: {e}. Gerando relatório mock de fallback.")
+        _log_erro_http("Falha na comunicação com o agente de IA (gerando relatório mock de fallback)", e)
         conteudo = _gerar_placeholder(submissao) + "\n\n*⚠️ NOTA: Este relatório foi gerado automaticamente usando dados simulados devido a uma falha de conexão com o agente de IA real.*"
         
     relatorio = Relatorio(
