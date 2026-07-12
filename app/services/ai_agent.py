@@ -89,7 +89,7 @@ def gerar_relatorio_ia(submissao):
     session_url = f"{agent_url}/apps/{app_name}/users/{user_id}/sessions/{session_id}"
     try:
         logger.info(f"Criando sessão do agente: {session_url}")
-        resp_session = requests.post(session_url, timeout=10)
+        resp_session = requests.post(session_url, timeout=60)
         resp_session.raise_for_status()
         logger.info("Sessão criada com sucesso no agente!")
     except Exception as e:
@@ -111,7 +111,7 @@ def gerar_relatorio_ia(submissao):
     
     try:
         logger.info("Enviando dados da submissão para a IA...")
-        resp_run = requests.post(run_url, json=payload, timeout=45)
+        resp_run = requests.post(run_url, json=payload, timeout=60)
         resp_run.raise_for_status()
         
         response_json = resp_run.json()
