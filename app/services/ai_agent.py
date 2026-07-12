@@ -13,14 +13,22 @@ logger = logging.getLogger(__name__)
 
 def _gerar_placeholder(submissao):
     """Gera um relatório realista pré-programado ("mock") para a equipe de Front-End trabalhar."""
+    pontuacao_calculada = sum(
+        (r.pergunta.pontuacao if (r.pergunta and r.pergunta.pontuacao is not None) else 0)
+        for r in submissao.respostas
+    )
+    pontuacao_total = submissao.pontuacao if submissao.pontuacao is not None else pontuacao_calculada
+
     return (
-        "# Pontos Fortes:\n"
+        "# Pontuação Geral:\n"
+        f"O candidato obteve {pontuacao_total} pontos, valor considerado dentro da faixa esperada com base nas respostas fornecidas.\n\n"
+        "# Pontos Positivos:\n"
         "- **Reação sob pressão:** O candidato demonstra uma abordagem equilibrada ao tentar manter a calma e, crucialmente, valorizar a colaboração com a equipe. Isso indica autoconsciência e reconhecimento da força coletiva, características essenciais para uma liderança eficaz e ética.\n"
         "- **Lidar com atrasos:** A postura de informar a gerência imediatamente reflete um alto nível de transparência, honestidade e responsabilidade. Essas qualidades são fundamentais para construir confiança.\n\n"
-        "# Pontos Fracos:\n"
+        "# Pontos Negativos (a melhorar):\n"
         "- Nenhum ponto fraco significativo ou área de risco foi identificada com base nas respostas fornecidas.\n\n"
         "# Conclusão:\n"
-        f"O candidato demonstrou um perfil ético robusto e promissor. A pontuação total de {submissao.pontuacao}, aliada à qualidade das respostas, sugere que o candidato está bem alinhado com os princípios éticos esperados e apto para assumir responsabilidades que demandem integridade e liderança colaborativa."
+        f"O candidato demonstrou um perfil ético robusto e promissor. A pontuação total de {pontuacao_total}, aliada à qualidade das respostas, sugere que o candidato está bem alinhado com os princípios éticos esperados e apto para assumir responsabilidades que demandem integridade e liderança colaborativa."
     )
 
 
@@ -48,30 +56,50 @@ Respostas:"""
 
 
 def extrair_texto_resposta(response_json):
-    """Extrai robustamente o texto da resposta do agente em vários formatos retornados."""
+    """Extrai robustamente o texto da resposta do agente em vários formatos retornados.
+
+    IMPORTANTE: quando o agente usa sub-agentes/ferramentas (ex: consulta ao Código de Ética)
+    antes ou durante a geração do relatório, o /run do ADK retorna VÁRIOS eventos de sessão
+    (function_call, function_response, e um ou mais turnos de texto do modelo). O relatório
+    final pode estar espalhado por múltiplos turnos de texto, não apenas no último evento.
+    Por isso, concatenamos o texto de TODOS os turnos do modelo (role != "user"), na ordem
+    em que aparecem, e ignoramos partes sem texto (ex: function_call/function_response).
+    """
     if isinstance(response_json, list) and len(response_json) > 0:
-        # A API do ADK retorna a lista completa de interações da sessão; o último é a resposta final
-        last_item = response_json[-1]
-        if isinstance(last_item, dict):
-            content = last_item.get("content", {})
+        textos = []
+        for item in response_json:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content", {})
+            if not isinstance(content, dict):
+                continue
+            role = content.get("role")
+            if role == "user":
+                # ignora o eco da própria mensagem enviada por nós
+                continue
             parts = content.get("parts", [])
-            if parts and isinstance(parts, list):
-                text = parts[0].get("text")
-                if text:
-                    return text
+            if not isinstance(parts, list):
+                continue
+            for part in parts:
+                if isinstance(part, dict):
+                    texto_part = part.get("text")
+                    if texto_part:
+                        textos.append(texto_part)
+        if textos:
+            return "\n".join(textos)
     elif isinstance(response_json, dict):
         content = response_json.get("content", {})
         parts = content.get("parts", [])
         if parts and isinstance(parts, list):
-            text = parts[0].get("text")
-            if text:
-                return text
+            textos = [p.get("text") for p in parts if isinstance(p, dict) and p.get("text")]
+            if textos:
+                return "\n".join(textos)
         resp = response_json.get("response", {})
         if isinstance(resp, dict) and "text" in resp:
             return resp["text"]
         if "text" in response_json:
             return response_json["text"]
-            
+
     raise ValueError("Formato de resposta do agente de IA inválido ou texto não encontrado.")
 
 
