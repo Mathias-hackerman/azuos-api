@@ -1,5 +1,6 @@
 import logging
 import time
+import uuid
 from datetime import date
 
 import requests
@@ -147,7 +148,13 @@ def gerar_relatorio_ia(submissao):
     agent_url = (current_app.config.get("AI_AGENT_URL") or "https://azuos-adk-agent-97yo.onrender.com").rstrip("/")
     app_name = current_app.config.get("AI_APP_NAME", "azuos_compliance_beta")
     user_id = f"u_{submissao.usuario_id}"
-    session_id = f"s_{submissao.submissao_id}"
+    # IMPORTANTE: sempre gera um session_id único, mesmo para a mesma submissão.
+    # Reutilizar o mesmo session_id (ex: "s_{submissao_id}") faz o ADK acumular o
+    # histórico de conversas anteriores na mesma sessão, o que pode confundir o
+    # modelo e fazer com que ele gere respostas genéricas/desalinhadas do input real
+    # (ex: reciclando o próprio few-shot example da instrução em vez de analisar os
+    # dados novos). Cada chamada deve começar do zero.
+    session_id = f"s_{submissao.submissao_id}_{uuid.uuid4().hex[:8]}"
 
     logger.info(f"Conectando ao agente de IA em {agent_url} para submissão {submissao.submissao_id}")
 
@@ -194,13 +201,25 @@ def gerar_relatorio_ia(submissao):
         resp_run.raise_for_status()
         
         response_json = resp_run.json()
+        # Debug: loga um resumo da resposta bruta, para investigação caso o
+        # conteúdo extraído pareça genérico ou incompleto novamente.
+        if isinstance(response_json, list):
+            logger.info(f"Resposta bruta do agente contém {len(response_json)} evento(s) de sessão.")
+        logger.debug(f"Resposta bruta do agente (truncada): {str(response_json)[:2000]}")
+
         conteudo = extrair_texto_resposta(response_json)
         logger.info("Relatório gerado com sucesso pelo agente de IA.")
         
     except Exception as e:
         _log_erro_http("Falha na comunicação com o agente de IA (gerando relatório mock de fallback)", e)
         conteudo = _gerar_placeholder(submissao) + "\n\n*⚠️ NOTA: Este relatório foi gerado automaticamente usando dados simulados devido a uma falha de conexão com o agente de IA real.*"
-        
+    finally:
+        # Best-effort: limpa a sessão no agente para não deixar histórico acumulado.
+        try:
+            requests.delete(session_url, timeout=10)
+        except Exception:
+            pass
+
     relatorio = Relatorio(
         conteudo=conteudo, 
         data_criacao=date.today(),
